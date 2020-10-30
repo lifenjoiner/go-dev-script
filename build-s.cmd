@@ -1,40 +1,54 @@
 ::https://golang.org/cmd/go/#hdr-Compile_packages_and_dependencies
 ::If a package matches patterns given in multiple flags, the latest match on the command line wins.
+::New `-trimpath` strategy has been implemented: https://golang.org/doc/go1.13. Old style one still works!
 @echo off
 Setlocal Enabledelayedexpansion
 
-echo Usage: %~n0 [MainDir [PkgSrcRoot PkgDir [ExtArgs]]]
+echo Usage: %~n0 [MainDir [SrcParent TopDir [ExtArgs]]]
 echo Overwrite ldflags example: -ldflags="all=-s -w -X main.APP_VERSION=2.0"
 
 set NeedPopd=
 set ExtArgs=%*
+
+:CurMainDir
 if not "%~1"=="" (
     pushd %1 && set NeedPopd=Y
     if "%~2"=="" (set "ExtArgs=!ExtArgs:%1=!") else (set "ExtArgs=!ExtArgs:%1 =!")
 )
-
 set MainDir=%cd%
-set Build=go build -ldflags="all=-s -w" -gcflags="all=-trimpath=%GoPath%\src" -gcflags="std=-trimpath=%GOROOT%\src" -gcflags="-trimpath=%MainDir%" -asmflags="all=-trimpath=%GoPath%\src" -asmflags="std=-trimpath=%GOROOT%\src" -asmflags="-trimpath=%MainDir%"
 
 :CusGoPath
+set SrcParent=
 if "%~2"=="" (
-    set PkgRoot=%cd%\..
+    if "%~n1"=="src" (
+        set SrcParent=%~dp1
+    ) else if exist src\ (
+        set SrcParent=%~dpn1
+    )
 ) else (
-    set PkgRoot=%2
+    set SrcParent=%2
     if "%~3"=="" (set "ExtArgs=!ExtArgs:%2=!") else (set "ExtArgs=!ExtArgs:%2 =!")
 )
-if "%PkgRoot:~-1%"=="\" set PkgRoot=%PkgRoot:~0,-1%
+if not "%SrcParent%"=="" if "!SrcParent:~-1!"=="\" set SrcParent=%SrcParent:~0,-1%
 
-:CurPkgPath
+:CurTopPath
 if "%~3"=="" (
-    set PkgDir=%MainDir%
+    set TopDir=%MainDir%
 ) else (
-    set PkgDir=%3
+    set TopDir=%3
     if "%~4"=="" (set "ExtArgs=!ExtArgs:%3=!") else (set "ExtArgs=!ExtArgs:%3 =!")
 )
-if "%PkgDir:~-1%"=="\" set PkgDir=%PkgDir:~0,-1%
+if "%TopDir:~-1%"=="\" set TopDir=%TopDir:~0,-1%
 
-call :BuildCmd "%PkgDir%" %PkgRoot%
+echo.
+echo MainDir: %MainDir%
+echo SrcParent: %SrcParent%
+echo TopDir: %TopDir%
+echo ExtArgs: %ExtArgs%
+
+if not "%SrcParent%"=="" set GOPATH=%GOPATH%;%SrcParent%
+set Build=go build -ldflags="all=-s -w" -trimpath -gcflags="-trimpath=%MainDir%" -asmflags="-trimpath=%MainDir%"
+if not "%MainDir%"=="%TopDir%" set Build=%Build% -gcflags="-trimpath=%TopDir%" -asmflags="-trimpath=%TopDir%"
 
 @echo on
 %Build% %ExtArgs%
@@ -43,13 +57,4 @@ call :BuildCmd "%PkgDir%" %PkgRoot%
 if _%NeedPopd%==_Y popd
 
 Endlocal
-exit /b
-
-::BuildCmd PkgDir PkgRoot
-:BuildCmd
-if not "%~n2"=="src" goto :EOF
-set "PkgName=!PkgDir:%~dpn2\=!"
-set PkgSpc=%PkgName:\=/%
-set Build=%Build% -gcflags="%PkgSpc%/...=-trimpath=%~2\%PkgName%" -asmflags="%PkgSpc%/...=-trimpath=%~2\%PkgName%" -gcflags="%PkgSpc%/vendor/...=-trimpath=%~2\%PkgName%\vendor" -asmflags="%PkgSpc%/vendor/...=-trimpath=%~2\%PkgName%\vendor"
-set GOPATH=%GOROOT%\GOPATH;%~dp2
 exit /b
